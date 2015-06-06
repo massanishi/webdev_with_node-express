@@ -1,0 +1,23 @@
+{
+  "name": "meadowlark.js",
+  "version": "1.0.0",
+  "description": "Sample website created along with Web Development with Node and Express by Mathew Brown",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/massanishi/webdev_with_node-express"
+  },
+  "keywords": [
+    "node",
+    "express"
+  ],
+  "author": "masa",
+  "license": "GPL",
+  "bugs": {
+    "url": "https://github.com/massanishi/webdev_with_node-express/issues"
+  },
+  "homepage": "https://github.com/massanishi/webdev_with_node-express"
+}
