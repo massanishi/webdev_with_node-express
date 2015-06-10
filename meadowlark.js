@@ -1,31 +1,53 @@
 var express = require('express');
 var app = express();
+var vhost = require('vhost');
+// create "admin" subdomain...this should appear
+// before all your other routes
+var admin = express.Router();
+app.use(vhost('admin.*', admin));
+// create admin routes; these can be defined anywhere
+admin.get('/', function(req, res) {
+    res.render('admin/home');
+});
+admin.get('/users', function(req, res) {
+    res.render('admin/users');
+});
 
+app.use(require('cors')());
 
-var fortune = require('./lib/fortune.js');
 var formidable = require('formidable');
 var jqupload = require('jquery-file-upload-middleware');
 
 var credentials = require('./credentials.js');
 var cartValidation = require('./lib/cartValidation.js');
 
-var handlebars = require('express3-handlebars')
-    .create({
-        defaultLayout: 'main'
-    });
+var handlebars = require('express3-handlebars').create({
+    defaultLayout: 'main',
+    helpers: {
+        static: function(name) {
+            return require('./lib/static.js').map(name);
+        }
+    }
+});
 app.engine('handlebars', handlebars.engine);
 app.set('view engine', 'handlebars');
 
 app.use(require('body-parser')());
+var MongoSessionStore = require('session-mongoose')(require('connect'));
+var sessionStore = new MongoSessionStore({
+    url: credentials.mongo.connectionString
+});
 app.use(require('cookie-parser')(credentials.cookieSecret));
-app.use(require('express-session')());
+app.use(require('express-session')({
+    store: sessionStore
+}));
 app.use(express.static(__dirname + '/public'));
 
 
 app.use(cartValidation.checkWaivers);
 app.use(cartValidation.checkGuestCounts);
 
-
+// Not related with subdomain. It's error domain
 app.use(function(req, res, next) {
     // create a domain for this request
     var domain = require('domain').create();
@@ -79,95 +101,38 @@ app.use('/upload', function(req, res, next) {
 
 app.use(require('./lib/tourRequiresWaiver.js'));
 
-app.use('/newsletter', function(req, res) {
-    res.render('newsletter', {
-        csrf: 'CSRF token goes here'
-    });
-});
-
-app.get('/contest/vacation-photo', function(req, res) {
-    var now = new Date();
-    res.render('contest/vacation-photo', {
-        year: now.getFullYear(),
-        month: now.getMonth()
-    });
-});
-
-app.post('/contest/vacation-photo/:year/:month', function(req, res) {
-    var form = new formidable.IncomingForm();
-    form.parse(req, function(err, fields, files) {
-        if (err) return res.redirect(303, '/error');
-        console.log('received fields:');
-        console.log(fields);
-        console.log('received files:');
-        console.log(files);
-        res.redirect(303, '/thank-you');
-    });
-});
-
-app.post('/process', function(req, res) {
-    if (req.xhr || req.accepts('json,html') === 'json') {
-        res.send({
-            success: true
-        });
-    } else {
-        console.log('Form (from querystring): ' + req.query.form);
-        console.log('CSRF token (from hidden form field): ' + req.body._csrf);
-        console.log('Name (from visible form field): ' + req.body.name);
-        console.log('Email (from visible from field): ' + req.body.email);
-        res.redirect(303, '/thank-you');
+var autoViews = {};
+var fs = require('fs');
+app.use(function(req, res, next) {
+    var path = req.path.toLowerCase();
+    // check cache; if it's there, render the view
+    if (autoViews[path]) return res.render(autoViews[path]);
+    // if it's not in the cache, see if there's
+    // a .handlebars file that matches
+    if (fs.existsSync(__dirname + '/views' + path + '.handlebars')) {
+        autoViews[path] = path.replace(/^\//, '');
+        return res.render(autoViews[path]);
     }
+    // no view found; pass on to 404 handler
+    next();
 });
 
-app.post('/cart/checkout', function(req, res) {
-    var cart = req.session.cart;
-    if (!cart) next(new Error('Cart does not exist.'));
-    var name = req.body.name || '',
-        email = req.body.email || '';
-    // input validation
-    if (!email.match(VALID_EMAIL_REGEX))
-        return res.next(new Error('Invalid email address.'));
-    // assign a random cart ID; normally we would use a database ID here
-    cart.number = Math.random().toString().replace(/^0\.0*/, '');
-    cart.billing = {
-        name: name,
-        email: email,
-    };
-    res.render('email/cart-thank-you', {
-        layout: null,
-        cart: cart
-    }, function(err, html) {
-        if (err) console.log('error in email template');
 
-        var emailService = require('./lib/email.js')(credentials);
-        emailService.send('joecustomer@gmail.com', 'Hood River tours on sale today!',
-            'Get \'em while they\'re hot!');
-    });
 
-    res.render('cart-thank-you', {
-        cart: cart
-    });
-});
+switch (app.get('env')) {
+    case 'development':
+        // compact, colorful dev logging
+        app.use(require('morgan')('dev'));
+        break;
+    case 'production':
+        // module 'express-logger' supports daily log rotation
+        app.use(require('express-logger')({
+            path: __dirname + '/log/requests.log'
+        }));
+        break;
+}
 
-app.get('/', function(req, res) {
-    res.render('home');
-});
-
-app.get('/about', function(req, res) {
-    res.render('about', {
-        fortune: fortune.getFortune(),
-        pageTestScript: '/qa/tests-about.js'
-    });
-});
-
-app.get('/tours/hood-river', function(req, res) {
-    res.render('tours/hood-river');
-});
-
-app.get('/tours/request-group-rate', function(req, res) {
-    res.render('tours/request-group-rate');
-});
-
+require('./routes.js')(app);
 
 // Custom 404 page
 app.use(function(req, res) {
@@ -182,18 +147,63 @@ app.use(function(err, req, res, next) {
     res.render('500');
 });
 
-switch (app.get('env')) {
-    case 'development':
-        // compact, colorful dev logging
-        app.use(require('morgan')('dev'));
-        break;
-    case 'production':
-        // module 'express-logger' supports daily log rotation
-        app.use(require('express-logger')({
-            path: __dirname + '/log/requests.log'
+var Attraction = require('./models/attraction.js');
+app.get('/api/attractions', function(req, res) {
+    Attraction.find({
+        approved: true
+    }, function(err, attractions) {
+        if (err) return res.send(500, 'Error occurred: database error.');
+        res.json(attractions.map(function(a) {
+            return {
+                name: a.name,
+                id: a._id,
+                description: a.description,
+                location: a.location,
+            };
         }));
-        break;
-}
+    });
+});
+app.post('/api/attraction', function(req, res) {
+    var a = new Attraction({
+        name: req.body.name,
+        description: req.body.description,
+        location: {
+            lat: req.body.lat,
+            lng: req.body.lng
+        },
+        history: {
+            event: 'created',
+            email: req.body.email,
+            date: new Date(),
+        },
+        approved: false,
+    });
+    a.save(function(err, a) {
+        if (err) return res.send(500, 'Error occurred: database error.');
+        res.json({
+            id: a._id
+        });
+    });
+});
+app.get('/api/attraction/:id', function(req, res) {
+    Attraction.findById(req.params.id, function(err, a) {
+        if (err) return res.send(500, 'Error occurred: database error.');
+        res.json({
+            name: a.name,
+            id: a._id,
+            description: a.description,
+            location: a.location,
+        });
+    });
+});
+
+// website routes go here
+// define API routes here with rest.VERB....
+// API configuration
+var apiOptions = {
+    context: '/api',
+    domain: require('domain').create(),
+};
 
 app.set('port', process.env.PORT || 3000);
 // app.listen(app.get('port'), function() {
