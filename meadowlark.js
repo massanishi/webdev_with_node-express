@@ -37,6 +37,13 @@ var MongoSessionStore = require('session-mongoose')(require('connect'));
 var sessionStore = new MongoSessionStore({
     url: credentials.mongo.connectionString
 });
+
+app.use(require('csurf')());
+app.use(function(req, res, next) {
+    res.locals._csrfToken = req.csrfToken();
+    next();
+});
+
 app.use(require('cookie-parser')(credentials.cookieSecret));
 app.use(require('express-session')({
     store: sessionStore

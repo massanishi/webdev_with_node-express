@@ -1,5 +1,6 @@
 var Customer = require('../models/customer.js');
 var customerViewModel = require('../viewModels/customer.js');
+
 exports = {
     registerRoutes: function(app) {
         app.get('/customer/:id', this.home);
